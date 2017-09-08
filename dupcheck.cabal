@@ -1,7 +1,7 @@
 name:                dupcheck
 version:             0.1.0.0
--- synopsis:
--- description:
+synopsis:            Checker of duplicated files
+description:         This command line tool checks duplicated files in specified folders.
 homepage:            https://github.com/satosystems/dupcheck#readme
 license:             BSD3
 license-file:        LICENSE
@@ -19,7 +19,7 @@ library
   build-depends:       base >= 4.7 && < 5
   default-language:    Haskell2010
 
-executable dupcheck-exe
+executable dupcheck
   hs-source-dirs:      app
   main-is:             Main.hs
   ghc-options:         -threaded -rtsopts -with-rtsopts=-N
@@ -39,3 +39,4 @@ test-suite dupcheck-test
 source-repository head
   type:     git
   location: https://github.com/satosystems/dupcheck
+
