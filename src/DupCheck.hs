@@ -3,8 +3,10 @@
 module DupCheck
   ( Options(..)
   , getOptions
+  , listDirectories
   ) where
 
+import Data.List.Unique (sortUniq)
 import Data.Version (showVersion)
 import Paths_dupcheck (version)
 import System.Console.CmdArgs ( Data
@@ -14,7 +16,9 @@ import System.Console.CmdArgs ( Data
                               , cmdArgs
                               , summary
                               )
-import System.Directory (doesDirectoryExist)
+import System.Directory ( doesDirectoryExist
+                        , listDirectory
+                        )
 
 data Options = Options
   { dirs :: [FilePath]
@@ -37,4 +41,23 @@ getOptions = do
     bs <- mapM doesDirectoryExist $ dirs ops
     let isValid = and bs
     return $ if isValid then Nothing else Just "Specified arguments are not directory"
+
+listDirectories :: [FilePath] -> IO [FilePath]
+listDirectories directories = listFiles (sortUniq $ map removeFileSeparator directories) []
+ where
+  removeFileSeparator :: FilePath -> FilePath
+  removeFileSeparator filePath | last filePath == '/' = init filePath
+                               | otherwise = filePath
+  listFiles :: [FilePath] -> [FilePath] -> IO [FilePath]
+  listFiles [] files = return files
+  listFiles (d:ds) files = do
+    listedFilesOrDirectories <- listDirectory d
+    listedFiles <- mapM listFiles' listedFilesOrDirectories
+    listFiles ds $ files ++ concat listedFiles
+   where
+    listFiles' :: FilePath -> IO [FilePath]
+    listFiles' filePath = do
+      let path = d ++ "/" ++ filePath
+      b <- doesDirectoryExist path
+      if b then listDirectories [path] else return [path]
 

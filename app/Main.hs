@@ -7,5 +7,5 @@ main = do
   a <- getOptions
   case a of
     (_, Just msg) -> putStrLn msg
-    (ops, _) -> print ops
+    (ops, _) -> listDirectories (dirs ops) >>= mapM_ putStrLn
 
