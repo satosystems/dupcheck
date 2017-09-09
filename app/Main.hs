@@ -1,5 +1,7 @@
 module Main where
 
+import Control.Concurrent.Async (mapConcurrently)
+
 import DupCheck
 
 main :: IO ()
@@ -9,6 +11,6 @@ main = do
     (_, Just msg) -> putStrLn msg
     (ops, _) -> do
       files <- listDirectories (dirs ops)
-      pairs <- mapM md5sum files
+      pairs <- mapConcurrently md5sum files
       mapM_ print pairs
 
