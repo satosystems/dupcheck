@@ -4,8 +4,13 @@ module DupCheck
   ( Options(..)
   , getOptions
   , listDirectories
+  , md5sum
   ) where
 
+import qualified Data.ByteString.Lazy as LBI
+import Data.Digest.Pure.MD5 ( md5
+                            , MD5Digest(..)
+                            )
 import Data.List.Unique (sortUniq)
 import Data.Version (showVersion)
 import Paths_dupcheck (version)
@@ -60,4 +65,9 @@ listDirectories directories = listFiles (sortUniq $ map removeFileSeparator dire
       let path = d ++ "/" ++ filePath
       b <- doesDirectoryExist path
       if b then listDirectories [path] else return [path]
+
+md5sum :: FilePath -> IO (MD5Digest, FilePath)
+md5sum file = do
+  contents <- LBI.readFile file
+  return (md5 contents, file)
 

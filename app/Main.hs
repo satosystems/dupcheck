@@ -7,5 +7,8 @@ main = do
   a <- getOptions
   case a of
     (_, Just msg) -> putStrLn msg
-    (ops, _) -> listDirectories (dirs ops) >>= mapM_ putStrLn
+    (ops, _) -> do
+      files <- listDirectories (dirs ops)
+      pairs <- mapM md5sum files
+      mapM_ print pairs
 

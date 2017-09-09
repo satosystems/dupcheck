@@ -18,8 +18,10 @@ library
   exposed-modules:     DupCheck
   other-modules:       Paths_dupcheck
   build-depends:       base >= 4.7 && < 5
+                     , bytestring
                      , cmdargs
                      , directory
+                     , pureMD5
                      , Unique
   default-language:    Haskell2010
 
