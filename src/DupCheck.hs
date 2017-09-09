@@ -4,12 +4,18 @@ module DupCheck
   ( Options(..)
   , getOptions
   , listDirectories
+  , listDuplicates
   , md5sum
   ) where
 
+import Control.Monad.IO.Class (liftIO)
+import qualified Data.ByteString as BI
 import qualified Data.ByteString.Lazy as LBI
-import Data.Digest.Pure.MD5 ( md5
-                            , MD5Digest(..)
+import Data.Digest.Pure.MD5 ( MD5Digest(..)
+                            , md5
+                            , md5Finalize
+                            , md5InitialContext
+                            , md5Update
                             )
 import Data.List.Unique (sortUniq)
 import Data.Version (showVersion)
@@ -21,6 +27,10 @@ import System.Console.CmdArgs ( Data
                               , cmdArgs
                               , summary
                               )
+import System.IO ( IOMode(ReadMode)
+                 , hClose
+                 , openFile
+                 )
 import System.Directory ( doesDirectoryExist
                         , listDirectory
                         )
@@ -67,7 +77,16 @@ listDirectories directories = listFiles (sortUniq $ map removeFileSeparator dire
       if b then listDirectories [path] else return [path]
 
 md5sum :: FilePath -> IO (MD5Digest, FilePath)
-md5sum file = do
-  contents <- LBI.readFile file
-  return (md5 contents, file)
+md5sum file = LBI.readFile file >>= \contents -> return (md5 contents, file)
+
+listDuplicates :: [(MD5Digest, FilePath)] -> [[FilePath]]
+listDuplicates [] = []
+listDuplicates pairs = listDups (head pairs) (tail pairs) []
+ where
+  listDups :: (MD5Digest, FilePath) -> [(MD5Digest, FilePath)] -> [[FilePath]] -> [[FilePath]]
+  listDups _ [] dups = dups
+  listDups (digest, file) list dups = listDups (head list) (tail list) $ if filtered == [] then dups else (file:filtered):dups
+   where
+    filtered :: [FilePath]
+    filtered = map snd (filter (\(key, _) -> digest == key) list)
 

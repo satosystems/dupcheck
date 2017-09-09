@@ -12,5 +12,7 @@ main = do
     (ops, _) -> do
       files <- listDirectories (dirs ops)
       pairs <- mapConcurrently md5sum files
+      let dups = listDuplicates pairs
       mapM_ print pairs
+      mapM_ print dups
 
