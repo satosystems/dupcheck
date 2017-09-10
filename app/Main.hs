@@ -1,5 +1,6 @@
 module Main where
 
+import Data.List (intersperse)
 import Control.Concurrent.Async (mapConcurrently)
 
 import DupCheck
@@ -13,6 +14,6 @@ main = do
       files <- listDirectories (dirs ops)
       pairs <- mapConcurrently md5sum files
       let dups = listDuplicates pairs
-      mapM_ print pairs
-      mapM_ print dups
+          dups' = intersperse [""] dups
+      mapM_ (\list -> mapM_ putStrLn list) dups'
 
