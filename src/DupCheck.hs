@@ -8,6 +8,7 @@ module DupCheck
   , md5sum
   ) where
 
+import qualified Control.Exception.Safe as E
 import Control.Monad.IO.Class (liftIO)
 import qualified Data.ByteString as BI
 import qualified Data.ByteString.Lazy as LBI
@@ -76,8 +77,17 @@ listDirectories directories = listFiles (sortUniq $ map removeFileSeparator dire
       b <- doesDirectoryExist path
       if b then listDirectories [path] else return [path]
 
-md5sum :: FilePath -> IO (MD5Digest, FilePath)
-md5sum file = BI.readFile file >>= \contents -> return (md5 (LBI.fromStrict contents), file)
+md5sum :: FilePath -> IO (Maybe MD5Digest, FilePath)
+md5sum filePath = readFile' filePath >>= \mc -> return (md5' mc, filePath)
+ where
+  md5' :: Maybe BI.ByteString -> Maybe MD5Digest
+  md5' Nothing = Nothing
+  md5' (Just contents) = Just (md5 (LBI.fromStrict contents))
+  readFile' :: FilePath -> IO (Maybe BI.ByteString)
+  readFile' filePath = (BI.readFile filePath >>= return . Just) `E.catch` onError
+   where
+    onError :: IOError -> IO (Maybe BI.ByteString)
+    onError _ = return Nothing
 
 listDuplicates :: [(MD5Digest, FilePath)] -> [(MD5Digest, [FilePath])]
 listDuplicates [] = []

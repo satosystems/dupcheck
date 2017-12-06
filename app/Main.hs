@@ -13,7 +13,8 @@ main = do
     (ops, _) -> do
       files <- listDirectories (dirs ops)
       pairs <- mapConcurrently md5sum files
-      let dups = listDuplicates pairs
+      let pairs' = map (\(Just digest, value) -> (digest, value)) $ filter (\(key, _) -> key /= Nothing) pairs
+          dups = listDuplicates pairs'
           dups' = intersperse [""] $ map snd dups
       mapM_ (\list -> mapM_ putStrLn list) dups'
 

@@ -22,6 +22,7 @@ library
                      , cmdargs
                      , directory
                      , pureMD5
+                     , safe-exceptions
                      , Unique
   default-language:    Haskell2010
 
