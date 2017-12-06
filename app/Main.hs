@@ -14,6 +14,6 @@ main = do
       files <- listDirectories (dirs ops)
       pairs <- mapConcurrently md5sum files
       let dups = listDuplicates pairs
-          dups' = intersperse [""] dups
+          dups' = intersperse [""] $ map snd dups
       mapM_ (\list -> mapM_ putStrLn list) dups'
 

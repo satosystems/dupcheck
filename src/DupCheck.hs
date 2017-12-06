@@ -79,14 +79,17 @@ listDirectories directories = listFiles (sortUniq $ map removeFileSeparator dire
 md5sum :: FilePath -> IO (MD5Digest, FilePath)
 md5sum file = BI.readFile file >>= \contents -> return (md5 (LBI.fromStrict contents), file)
 
-listDuplicates :: [(MD5Digest, FilePath)] -> [[FilePath]]
+listDuplicates :: [(MD5Digest, FilePath)] -> [(MD5Digest, [FilePath])]
 listDuplicates [] = []
 listDuplicates pairs = listDups (head pairs) (tail pairs) []
  where
-  listDups :: (MD5Digest, FilePath) -> [(MD5Digest, FilePath)] -> [[FilePath]] -> [[FilePath]]
+  listDups :: (MD5Digest, FilePath) -> [(MD5Digest, FilePath)] -> [(MD5Digest, [FilePath])] -> [(MD5Digest, [FilePath])]
   listDups _ [] dups = dups
-  listDups (digest, file) list dups = listDups (head list) (tail list) $ if filtered == [] then dups else (file:filtered):dups
+  listDups (digest, file) rest dups =
+    listDups (head rest)
+             (if filtered == [] then (tail rest) else filter (\(key, _) -> digest /= key) rest)
+             (if filtered == [] then dups else (digest, file:filtered):dups)
    where
     filtered :: [FilePath]
-    filtered = map snd (filter (\(key, _) -> digest == key) list)
+    filtered = map snd (filter (\(key, _) -> key == digest) rest)
 
