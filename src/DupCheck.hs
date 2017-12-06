@@ -77,7 +77,7 @@ listDirectories directories = listFiles (sortUniq $ map removeFileSeparator dire
       if b then listDirectories [path] else return [path]
 
 md5sum :: FilePath -> IO (MD5Digest, FilePath)
-md5sum file = LBI.readFile file >>= \contents -> return (md5 contents, file)
+md5sum file = BI.readFile file >>= \contents -> return (md5 (LBI.fromStrict contents), file)
 
 listDuplicates :: [(MD5Digest, FilePath)] -> [[FilePath]]
 listDuplicates [] = []
