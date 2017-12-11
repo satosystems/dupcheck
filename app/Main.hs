@@ -13,7 +13,6 @@ main = do
     (ops, _) -> do
       files <- listDirectories (dirs ops)
       pairs <- mapConcurrently md5sum files
-      print pairs
       let fromJustKey (Just digest, value) = (digest, value)
           filterNotNothing (key, _) = key /= Nothing
           filteredPairs = map fromJustKey $ filter filterNotNothing pairs

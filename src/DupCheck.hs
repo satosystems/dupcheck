@@ -95,11 +95,16 @@ listDuplicates pairs = listDups (head pairs) (tail pairs) []
  where
   listDups :: (MD5Digest, FilePath) -> [(MD5Digest, FilePath)] -> [(MD5Digest, [FilePath])] -> [(MD5Digest, [FilePath])]
   listDups _ [] dups = dups
-  listDups (digest, file) rest dups =
-    listDups (head rest)
-             (if filtered == [] then (tail rest) else filter (\(key, _) -> digest /= key) rest)
-             (if filtered == [] then dups else (digest, file:filtered):dups)
+  listDups (digest, file) rest dups = case removedDuplicates of
+    [] -> added
+    (x:xs) -> listDups x
+      (if filtered == [] then xs else filter (\(key, _) -> digest /= key) xs)
+      added
    where
     filtered :: [FilePath]
     filtered = map snd (filter (\(key, _) -> key == digest) rest)
+    removedDuplicates :: [(MD5Digest, FilePath)]
+    removedDuplicates = filter (\(key, _) -> key /= digest) rest
+    added :: [(MD5Digest, [FilePath])]
+    added = if filtered == [] then dups else (digest, file:filtered):dups
 
