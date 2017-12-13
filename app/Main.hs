@@ -14,6 +14,7 @@ main = do
       files <- listDirectories (dirs ops)
       pairs <- mapConcurrently md5sum files
       let fromJustKey (Just digest, value) = (digest, value)
+          fromJustKey _ = error "must be filtered not Nothing key"
           filterNotNothing (key, _) = key /= Nothing
           filteredPairs = map fromJustKey $ filter filterNotNothing pairs
           dups = listDuplicates filteredPairs
