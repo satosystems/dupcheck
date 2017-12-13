@@ -15,7 +15,8 @@ main = do
       pairs <- mapConcurrently md5sum files
       let fromJustKey (Just digest, value) = (digest, value)
           fromJustKey _ = error "must be filtered not Nothing key"
-          filterNotNothing (key, _) = key /= Nothing
+          filterNotNothing (Just _, _) = True
+          filterNotNothing _ = False
           filteredPairs = map fromJustKey $ filter filterNotNothing pairs
           dups = listDuplicates filteredPairs
           dupLists = intersperse [""] $ map snd dups
