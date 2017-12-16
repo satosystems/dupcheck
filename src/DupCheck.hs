@@ -67,10 +67,12 @@ listDirectories directories = listFiles (sortUniq $ map removeFileSeparator dire
   listFiles :: [FilePath] -> [FilePath] -> IO [FilePath]
   listFiles [] files = return files
   listFiles (d:ds) files = do
-    listedFilesOrDirectories <- listDirectory d
+    listedFilesOrDirectories <- (listDirectory d) `E.catch` onError
     listedFiles <- mapM listFiles' listedFilesOrDirectories
     listFiles ds $ files ++ concat listedFiles
    where
+    onError :: IOError -> IO [FilePath]
+    onError _ = return []
     listFiles' :: FilePath -> IO [FilePath]
     listFiles' filePath = do
       let path = d ++ "/" ++ filePath
