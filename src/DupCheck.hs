@@ -3,8 +3,7 @@
 module DupCheck
   ( Options(..)
   , getOptions
-  , listDirectories
-  , listDuplicates
+  , listFileSize
   , md5sum
   ) where
 
@@ -25,11 +24,14 @@ import System.Console.CmdArgs ( Data
                               , cmdArgs
                               , summary
                               )
-import System.IO ( IOMode(ReadMode)
+import System.IO ( Handle
+                 , IOMode(ReadMode)
                  , hClose
+                 , hPutStrLn
                  , openFile
                  )
 import System.Directory ( doesDirectoryExist
+                        , getFileSize
                         , listDirectory
                         )
 
@@ -55,55 +57,35 @@ getOptions = do
     let isValid = and bs
     return $ if isValid then Nothing else Just "Specified arguments are not directory"
 
-listDirectories :: [FilePath] -> IO [FilePath]
-listDirectories directories = listFiles (sortUniq $ map removeFileSeparator directories) []
+listFileSize :: Handle -> [FilePath] -> IO ()
+listFileSize handle directories = listFiles (sortUniq $ map removeFileSeparator directories)
  where
   removeFileSeparator :: FilePath -> FilePath
   removeFileSeparator filePath | last filePath == '/' = init filePath
                                | otherwise = filePath
-  listFiles :: [FilePath] -> [FilePath] -> IO [FilePath]
-  listFiles [] files = return files
-  listFiles (d:ds) files = do
-    listedFilesOrDirectories <- (listDirectory d) `E.catch` onError
-    listedFiles <- mapM listFiles' listedFilesOrDirectories
-    listFiles ds $ files ++ concat listedFiles
+  listFiles :: [FilePath] -> IO ()
+  listFiles [] = return ()
+  listFiles (d:ds) = do
+    listed <- (listDirectory d) `E.catch` (const $ return [] :: IOError -> IO [FilePath])
+    mapM_ listFile listed
+    listFiles ds
    where
-    onError :: IOError -> IO [FilePath]
-    onError _ = return []
-    listFiles' :: FilePath -> IO [FilePath]
-    listFiles' filePath = do
+    listFile :: FilePath -> IO ()
+    listFile filePath = do
       let path = d ++ "/" ++ filePath
       b <- doesDirectoryExist path
-      if b then listDirectories [path] else return [path]
+      if b then listFileSize handle [path] else do
+        size <- (getFileSize path) `E.catch` (const $ return (-1) :: IOError -> IO Integer)
+        case size of
+          (-1) -> return ()
+          _ -> hPutStrLn handle (show size ++ ":" ++ path)
 
-md5sum :: FilePath -> IO (Maybe MD5Digest, FilePath)
-md5sum filePath = readFile' filePath >>= \mc -> return (md5' mc, filePath)
+md5sum :: FilePath -> IO (Maybe MD5Digest)
+md5sum filePath = readFile' filePath >>= \mc -> return $ md5' mc
  where
   md5' :: Maybe BI.ByteString -> Maybe MD5Digest
   md5' Nothing = Nothing
   md5' (Just contents) = Just (md5 (LBI.fromStrict contents))
   readFile' :: FilePath -> IO (Maybe BI.ByteString)
-  readFile' filePath = (BI.readFile filePath >>= return . Just) `E.catch` onError
-   where
-    onError :: IOError -> IO (Maybe BI.ByteString)
-    onError _ = return Nothing
-
-listDuplicates :: [(MD5Digest, FilePath)] -> [(MD5Digest, [FilePath])]
-listDuplicates [] = []
-listDuplicates pairs = listDups (head pairs) (tail pairs) []
- where
-  listDups :: (MD5Digest, FilePath) -> [(MD5Digest, FilePath)] -> [(MD5Digest, [FilePath])] -> [(MD5Digest, [FilePath])]
-  listDups _ [] dups = dups
-  listDups (digest, file) rest dups = case removedDuplicates of
-    [] -> added
-    (x:xs) -> listDups x
-      (if filtered == [] then xs else filter (\(key, _) -> digest /= key) xs)
-      added
-   where
-    filtered :: [FilePath]
-    filtered = map snd (filter (\(key, _) -> key == digest) rest)
-    removedDuplicates :: [(MD5Digest, FilePath)]
-    removedDuplicates = filter (\(key, _) -> key /= digest) rest
-    added :: [(MD5Digest, [FilePath])]
-    added = if filtered == [] then dups else (digest, file:filtered):dups
+  readFile' filePath = (BI.readFile filePath >>= return . Just) `E.catch` (const $ return Nothing :: IOError -> IO (Maybe BI.ByteString))
 
