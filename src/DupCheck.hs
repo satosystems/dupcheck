@@ -12,11 +12,8 @@ import qualified Control.Exception.Safe as E
 import Control.Monad.IO.Class (liftIO)
 import qualified Data.ByteString as BI
 import qualified Data.ByteString.Lazy as LBI
-import Data.Digest.Pure.MD5 ( MD5Digest(..)
+import Data.Digest.Pure.MD5 ( MD5Digest
                             , md5
-                            , md5Finalize
-                            , md5InitialContext
-                            , md5Update
                             )
 import Data.List.Unique (sortUniq)
 import Data.Version (showVersion)
