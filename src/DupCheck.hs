@@ -36,6 +36,7 @@ import System.IO ( Handle
 import System.Directory ( doesDirectoryExist
                         , getFileSize
                         , listDirectory
+                        , pathIsSymbolicLink
                         )
 
 data Options = Options
@@ -76,12 +77,14 @@ listFileSize handle directories = listFiles (sortUniq $ map removeFileSeparator 
     listFile :: FilePath -> IO ()
     listFile filePath = do
       let path = d ++ "/" ++ filePath
-      b <- doesDirectoryExist path
-      if b then listFileSize handle [path] else do
-        size <- (getFileSize path) `E.catch` (const $ return (-1) :: IOError -> IO Integer)
-        case size of
-          (-1) -> return ()
-          _ -> hPutStrLn handle (show size ++ ":" ++ path)
+      isSymbolicLink <- pathIsSymbolicLink path
+      if isSymbolicLink then return () else do
+        isDirectory <- doesDirectoryExist path
+        if isDirectory then listFileSize handle [path] else do
+          size <- (getFileSize path) `E.catch` (const $ return (-1) :: IOError -> IO Integer)
+          case size of
+            (-1) -> return ()
+            _ -> hPutStrLn handle (show size ++ ":" ++ path)
 
 md5sum :: FilePath -> IO (Maybe MD5Digest)
 md5sum filePath = do
