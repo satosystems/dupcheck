@@ -11,8 +11,11 @@ import qualified Control.Exception.Safe as E
 import Control.Monad.IO.Class (liftIO)
 import qualified Data.ByteString as BI
 import qualified Data.ByteString.Lazy as LBI
-import Data.Digest.Pure.MD5 ( MD5Digest
-                            , md5
+import Data.Digest.Pure.MD5 ( MD5Context
+                            , MD5Digest
+                            , md5Finalize
+                            , md5InitialContext
+                            , md5Update
                             )
 import Data.List.Unique (sortUniq)
 import Data.Version (showVersion)
@@ -81,11 +84,17 @@ listFileSize handle directories = listFiles (sortUniq $ map removeFileSeparator 
           _ -> hPutStrLn handle (show size ++ ":" ++ path)
 
 md5sum :: FilePath -> IO (Maybe MD5Digest)
-md5sum filePath = readFile' filePath >>= \mc -> return $ md5' mc
+md5sum filePath = do
+  handle <- openFile filePath ReadMode
+  digest <- (md5sum' handle md5InitialContext) `E.catch` (const $ return Nothing :: IOError -> IO (Maybe MD5Digest))
+  hClose handle
+  return digest
  where
-  md5' :: Maybe BI.ByteString -> Maybe MD5Digest
-  md5' Nothing = Nothing
-  md5' (Just contents) = Just (md5 (LBI.fromStrict contents))
-  readFile' :: FilePath -> IO (Maybe BI.ByteString)
-  readFile' filePath = (BI.readFile filePath >>= return . Just) `E.catch` (const $ return Nothing :: IOError -> IO (Maybe BI.ByteString))
+  blockSize = 64
+  md5sum' :: Handle -> MD5Context -> IO (Maybe MD5Digest)
+  md5sum' handle context = do
+    contents <- BI.hGet handle blockSize
+    if contents == BI.empty || BI.length contents /= blockSize
+      then return (Just $ md5Finalize context contents)
+      else md5sum' handle $ md5Update context contents
 
