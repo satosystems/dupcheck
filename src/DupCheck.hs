@@ -4,7 +4,22 @@
 module DupCheck (main) where
 
 import qualified Control.Exception.Safe as E
+import Control.Monad (when)
 import Control.Monad.IO.Class (liftIO)
+import Data.Foldable (foldrM)
+import Database.SQLite.Simple ( Connection
+                              , FromRow(..)
+                              , Only(..)
+                              , SQLError
+                              , ToRow(..)
+                              , close
+                              , execute
+                              , execute_
+                              , open
+                              , query
+                              , query_
+                              )
+import Database.SQLite.Simple.FromRow (field)
 import qualified Data.ByteString as BI
 import qualified Data.ByteString.Lazy as LBI
 import Data.Digest.Pure.MD5 ( MD5Context
@@ -25,15 +40,21 @@ import System.Console.CmdArgs ( Data
                               , (&=)
                               , args
                               , cmdArgs
+                              , def
+                              , help
+                              , name
                               , summary
                               )
 import System.IO ( Handle
                  , IOMode(ReadMode)
                  , hClose
+                 , hFlush
+                 , hPutStr
                  , hPutStrLn
                  , openFile
-                 , openTempFile
+                 , openBinaryTempFile
                  , stderr
+                 , stdout
                  )
 import System.Directory ( doesDirectoryExist
                         , getFileSize
@@ -43,13 +64,23 @@ import System.Directory ( doesDirectoryExist
                         , removeFile
                         )
 
+data File = File String Integer (Maybe String) deriving Show
+
+instance FromRow File where
+  fromRow = File <$> field <*> field <*> field
+
+instance ToRow File where
+  toRow (File path size digest) = toRow (path, size, digest)
+
 data Options = Options
   { dirs :: [FilePath]
+  , debug :: Bool
   } deriving (Show, Data, Typeable)
 
 options :: Options
 options = Options
   { dirs = [] &= args
+  , debug = def &= name "d" &= help "keep temporary SQLite3 database"
   } &= summary ("dupcheck " ++ showVersion version)
 
 getOptions :: IO (Options, Maybe String)
@@ -65,45 +96,52 @@ getOptions = do
     let isValid = and bs
     return $ if isValid then Nothing else Just "Specified arguments are not directory"
 
-listFileSize :: Handle -> [FilePath] -> IO ()
-listFileSize handle directories = listFiles (sortUniq $ map removeFileSeparator directories)
+listFileSize :: Connection -> [FilePath] -> IO Integer
+listFileSize conn directories = listFiles conn (sortUniq $ map removeFileSeparator directories) 0
  where
   removeFileSeparator :: FilePath -> FilePath
   removeFileSeparator filePath | last filePath == '/' = init filePath
                                | otherwise = filePath
-  listFiles :: [FilePath] -> IO ()
-  listFiles [] = return ()
-  listFiles (d:ds) = do
+  listFiles :: Connection -> [FilePath] -> Integer -> IO Integer
+  listFiles _ [] n = return n
+  listFiles conn (d:ds) n = do
     listed <- (listDirectory d) `E.catch` (const $ return [] :: IOError -> IO [FilePath])
-    mapM_ listFile listed
-    listFiles ds
+    n' <- foldrM listFile n listed
+    listFiles conn ds n'
    where
-    listFile :: FilePath -> IO ()
-    listFile filePath = do
+    listFile :: FilePath -> Integer -> IO Integer
+    listFile filePath n = do
       let path = d ++ "/" ++ filePath
       isSymbolicLink <- pathIsSymbolicLink path
-      if isSymbolicLink then return () else do
+      if isSymbolicLink then return n else do
         isDirectory <- doesDirectoryExist path
-        if isDirectory then listFileSize handle [path] else do
+        if isDirectory then listFiles conn [path] n else do
           size <- (getFileSize path) `E.catch` (const $ return (-1) :: IOError -> IO Integer)
           case size of
-            (-1) -> return ()
-            _ -> hPutStrLn handle (show size ++ ":" ++ path)
+            (-1) -> return n
+            _ -> do
+              execute conn "insert into file values (?, ?, ?)" (File path size Nothing)
+              let n' = n + 1
+              let num = show n'
+              let len = if n == 0 then 0 else length $ show n
+              hPutStr stdout $ (take len $repeat '\b') ++ num
+              hFlush stdout
+              return n'
 
-md5sum :: FilePath -> IO (Maybe MD5Digest)
-md5sum filePath = do
+updateDigest :: Connection -> FilePath -> IO ()
+updateDigest conn  filePath = do
   handle <- openFile filePath ReadMode
-  digest <- (md5sum' handle md5InitialContext) `E.catch` (const $ return Nothing :: IOError -> IO (Maybe MD5Digest))
+  digest <- (md5sum handle md5InitialContext) `E.catch` (const $ return () :: IOError -> IO ())
   hClose handle
   return digest
  where
   blockSize = 64
-  md5sum' :: Handle -> MD5Context -> IO (Maybe MD5Digest)
-  md5sum' handle context = do
+  md5sum :: Handle -> MD5Context -> IO ()
+  md5sum handle context = do
     contents <- BI.hGet handle blockSize
     if contents == BI.empty || BI.length contents /= blockSize
-      then return (Just $ md5Finalize context contents)
-      else md5sum' handle $ md5Update context contents
+      then execute conn "update file set digest = ? where path = ?" (show (md5Finalize context contents), filePath)
+      else md5sum handle $ md5Update context contents
 
 main :: IO ()
 main = do
@@ -112,40 +150,33 @@ main = do
     (_, Just msg) -> hPutStrLn stderr msg
     (ops, _) -> do
       tempDir <- getTemporaryDirectory
-      (path, handle) <- openTempFile tempDir "dupcheck-.tmp"
-      listFileSize handle (dirs ops)
+      (path, handle) <- openBinaryTempFile tempDir "dupcheck-.sqlite3"
       hClose handle
-      contents <- readFile path
-      let toTuple t = let ts = T.splitOn ":" t
-                      in (ts !! 0, ts !! 1)
-          sizes = map toTuple (T.lines (T.pack contents))
-          sortedSizes = sortBy (comparing fst) sizes
-      digests <- if sortedSizes == []
-        then return []
-        else getDigests False (head sortedSizes) (tail sortedSizes) []
-      let sortedDigests = sortBy (comparing fst) digests
-      if sortedDigests == []
-        then return ()
-        else printDups False (head sortedDigests) (tail sortedDigests)
-      removeFile path
+      (debug ops) `when` putStrLn path
+      conn <- open path
+      (execute_ conn "create table file (path text primary key, size integer not null, digest text)") `E.catch` (const $ return () :: SQLError -> IO ())
+      putStr "File size checking: "
+      listFileSize conn (dirs ops)
+      rs1 <- query_ conn "select * from file where size in (select size from file group by size having count(*) > 1)" :: IO [File]
+      let maxCount = show $ length rs1
+      putStr $ "\nCalculating: 0/" ++ maxCount
+      foldrM (\(File path _ _) n -> do
+        updateDigest conn path
+        hPutStr stdout $ (take (length (show n ++ "/" ++ maxCount)) $ repeat '\b') ++ show (n + 1) ++ "/" ++ maxCount
+        hFlush stdout
+        return $ n + 1) 0 rs1
+      putStr "\n----------------------------------------\n"
+      rs2 <- query_ conn "select * from file table1 where exists (select * from file table2 where table1.digest = table2.digest group by table2.digest having count(table2.digest) > 1) order by table1.digest, table1.path" :: IO [File]
+      close conn
+      printDups rs2
+      (debug ops) `when` removeFile path
  where
-  getDigests :: Bool -> (T.Text, T.Text) -> [(T.Text, T.Text)] -> [(MD5Digest, T.Text)] -> IO [(MD5Digest, T.Text)]
-  getDigests True (_, value) [] digests = md5sum' value >>= \md -> return $ appendDigest md value digests
-  getDigests False _ [] digests = return digests
-  getDigests b (key, value) ((k, v):tuples) digests
-    | key == k = md5sum' value >>= \md -> getDigests True (k, v) tuples (appendDigest md value digests)
-    | b = md5sum' value >>= \md -> getDigests False (k, v) tuples (appendDigest md value digests)
-    | otherwise = getDigests False (k, v) tuples digests
-  appendDigest :: Maybe MD5Digest -> T.Text -> [(MD5Digest, T.Text)] -> [(MD5Digest, T.Text)]
-  md5sum' :: T.Text -> IO (Maybe MD5Digest)
-  md5sum' path = md5sum (T.unpack path)
-  appendDigest Nothing _ digests = digests
-  appendDigest (Just digest) filePath digests = (digest, filePath):digests
-  printDups :: Bool -> (MD5Digest, T.Text) -> [(MD5Digest, T.Text)] -> IO ()
-  printDups True (_, value) [] = TIO.putStrLn value
-  printDups False _ [] = return ()
-  printDups b (key, value) ((k, v):tuples)
-    | key == k = TIO.putStrLn value >> printDups True (k, v) tuples
-    | b = TIO.putStrLn value >> TIO.putStr "\n" >> printDups False (k, v) tuples
-    | otherwise = printDups False (k, v) tuples
+  printDups :: [File] -> IO ()
+  printDups files = printDups' Nothing files
+   where
+    printDups' :: Maybe String -> [File] -> IO ()
+    printDups' _ [] = return ()
+    printDups' Nothing ((File path _ digest):files) = putStrLn path >> printDups' digest files
+    printDups' d ((File path _ digest):files) | d == digest = putStrLn path >> printDups' digest files
+                                              | otherwise = putStrLn ('\n':path) >> printDups' digest files
 

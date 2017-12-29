@@ -23,6 +23,7 @@ library
                      , directory
                      , pureMD5
                      , safe-exceptions
+                     , sqlite-simple
                      , text
                      , Unique
   default-language:    Haskell2010
