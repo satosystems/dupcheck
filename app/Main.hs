@@ -1,6 +1,7 @@
 module Main where
 
-import Lib
+import qualified DupCheck (main)
 
 main :: IO ()
-main = someFunc
+main = DupCheck.main
+
