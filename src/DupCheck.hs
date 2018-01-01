@@ -88,36 +88,35 @@ getOptions = do
     return $ if isValid then Nothing else Just "Specified arguments are not directory"
 
 listFileSize :: Connection -> [FilePath] -> IO Integer
-listFileSize conn directories = listFiles conn (sortUniq $ map removeFileSeparator directories) 0
+listFileSize conn directories = listFiles (sortUniq $ map removeFileSeparator directories) 0
  where
   removeFileSeparator :: FilePath -> FilePath
   removeFileSeparator filePath | last filePath == '/' = init filePath
                                | otherwise = filePath
-  listFiles :: Connection -> [FilePath] -> Integer -> IO Integer
-  listFiles _ [] n = return n
-  listFiles conn (d:ds) n = do
+  listFiles :: [FilePath] -> Integer -> IO Integer
+  listFiles [] n = return n
+  listFiles (d:ds) n = do
     listed <- (listDirectory d) `catch` (const $ return [] :: IOError -> IO [FilePath])
-    n' <- foldrM listFile n listed
-    listFiles conn ds n'
-   where
-    listFile :: FilePath -> Integer -> IO Integer
-    listFile filePath n = do
-      let path = d ++ "/" ++ filePath
-      isSymbolicLink <- pathIsSymbolicLink path
-      if isSymbolicLink then return n else do
-        isDirectory <- doesDirectoryExist path
-        if isDirectory then listFiles conn [path] n else do
-          size <- (getFileSize path) `catch` (const $ return (-1) :: IOError -> IO Integer)
-          case size of
-            (-1) -> return n
-            _ -> do
-              execute conn "insert into file values (?, ?, ?)" (File path size Nothing)
-              let n' = n + 1
-              let num = show n'
-              let len = if n == 0 then 0 else length $ show n
-              hPutStr stdout $ (take len $repeat '\b') ++ num
-              hFlush stdout
-              return n'
+    n' <- foldrM (listFile d) n listed
+    listFiles ds n'
+  listFile :: FilePath -> FilePath -> Integer -> IO Integer
+  listFile dir filePath n = do
+    let path = dir ++ "/" ++ filePath
+    isSymbolicLink <- pathIsSymbolicLink path
+    if isSymbolicLink then return n else do
+      isDirectory <- doesDirectoryExist path
+      if isDirectory then listFiles [path] n else do
+        size <- (getFileSize path) `catch` (const $ return (-1) :: IOError -> IO Integer)
+        case size of
+          (-1) -> return n
+          _ -> do
+            execute conn "insert into file values (?, ?, ?)" (File path size Nothing)
+            let n' = n + 1
+            let num = show n'
+            let len = if n == 0 then 0 else length $ show n
+            hPutStr stdout $ (take len $repeat '\b') ++ num
+            hFlush stdout
+            return n'
 
 updateDigest :: Connection -> FilePath -> IO ()
 updateDigest conn  filePath = do
@@ -141,13 +140,13 @@ main = do
     (_, Just msg) -> hPutStrLn stderr msg
     (ops, _) -> do
       tempDir <- getTemporaryDirectory
-      (path, handle) <- openBinaryTempFile tempDir "dupcheck-.sqlite3"
+      (dbPath, handle) <- openBinaryTempFile tempDir "dupcheck-.sqlite3"
       hClose handle
-      (debug ops) `when` putStrLn path
-      conn <- open path
+      (debug ops) `when` putStrLn dbPath
+      conn <- open dbPath
       (execute_ conn "create table file (path text primary key, size integer not null, digest text)") `catch` (const $ return () :: SQLError -> IO ())
       putStr "File size checking: "
-      listFileSize conn (dirs ops)
+      _ <- listFileSize conn (dirs ops)
       rs1 <- query_ conn "select * from file where size in (select size from file group by size having count(*) > 1)" :: IO [File]
       let maxCount = show $ length rs1
       putStr $ "\nCalculating: 0/" ++ maxCount
@@ -155,19 +154,19 @@ main = do
         updateDigest conn path
         hPutStr stdout $ (take (length (show n ++ "/" ++ maxCount)) $ repeat '\b') ++ show (n + 1) ++ "/" ++ maxCount
         hFlush stdout
-        return $ n + 1) 0 rs1
+        return $ n + 1) (0 :: Int) rs1
       putStr "\n----------------------------------------\n"
       rs2 <- query_ conn "select * from file table1 where exists (select * from file table2 where table1.digest = table2.digest group by table2.digest having count(table2.digest) > 1) order by table1.digest, table1.path" :: IO [File]
       close conn
       printDups rs2
-      (debug ops) `when` removeFile path
+      (debug ops) `when` removeFile dbPath
  where
   printDups :: [File] -> IO ()
   printDups files = printDups' Nothing files
    where
     printDups' :: Maybe String -> [File] -> IO ()
     printDups' _ [] = return ()
-    printDups' Nothing ((File path _ digest):files) = putStrLn path >> printDups' digest files
-    printDups' d ((File path _ digest):files) | d == digest = putStrLn path >> printDups' digest files
-                                              | otherwise = putStrLn ('\n':path) >> printDups' digest files
+    printDups' Nothing ((File path _ digest):fs) = putStrLn path >> printDups' digest fs
+    printDups' d ((File path _ digest):fs) | d == digest = putStrLn path >> printDups' digest fs
+                                           | otherwise = putStrLn ('\n':path) >> printDups' digest fs
 

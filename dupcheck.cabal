@@ -16,6 +16,7 @@ cabal-version:       >=1.10
 library
   hs-source-dirs:      src
   exposed-modules:     DupCheck
+  ghc-options:         -Wall -threaded -rtsopts -with-rtsopts=-N -dynamic
   other-modules:       Paths_dupcheck
   build-depends:       base >= 4.7 && < 5
                      , bytestring
