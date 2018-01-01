@@ -3,36 +3,27 @@
 
 module DupCheck (main) where
 
-import qualified Control.Exception.Safe as E
+import Control.Exception.Safe (catch)
 import Control.Monad (when)
-import Control.Monad.IO.Class (liftIO)
 import Data.Foldable (foldrM)
 import Database.SQLite.Simple ( Connection
                               , FromRow(..)
-                              , Only(..)
                               , SQLError
                               , ToRow(..)
                               , close
                               , execute
                               , execute_
                               , open
-                              , query
                               , query_
                               )
 import Database.SQLite.Simple.FromRow (field)
 import qualified Data.ByteString as BI
-import qualified Data.ByteString.Lazy as LBI
 import Data.Digest.Pure.MD5 ( MD5Context
-                            , MD5Digest
                             , md5Finalize
                             , md5InitialContext
                             , md5Update
                             )
-import Data.List (sortBy)
 import Data.List.Unique (sortUniq)
-import Data.Ord (comparing)
-import qualified Data.Text as T
-import qualified Data.Text.IO as TIO
 import Data.Version (showVersion)
 import Paths_dupcheck (version)
 import System.Console.CmdArgs ( Data
@@ -105,7 +96,7 @@ listFileSize conn directories = listFiles conn (sortUniq $ map removeFileSeparat
   listFiles :: Connection -> [FilePath] -> Integer -> IO Integer
   listFiles _ [] n = return n
   listFiles conn (d:ds) n = do
-    listed <- (listDirectory d) `E.catch` (const $ return [] :: IOError -> IO [FilePath])
+    listed <- (listDirectory d) `catch` (const $ return [] :: IOError -> IO [FilePath])
     n' <- foldrM listFile n listed
     listFiles conn ds n'
    where
@@ -116,7 +107,7 @@ listFileSize conn directories = listFiles conn (sortUniq $ map removeFileSeparat
       if isSymbolicLink then return n else do
         isDirectory <- doesDirectoryExist path
         if isDirectory then listFiles conn [path] n else do
-          size <- (getFileSize path) `E.catch` (const $ return (-1) :: IOError -> IO Integer)
+          size <- (getFileSize path) `catch` (const $ return (-1) :: IOError -> IO Integer)
           case size of
             (-1) -> return n
             _ -> do
@@ -131,7 +122,7 @@ listFileSize conn directories = listFiles conn (sortUniq $ map removeFileSeparat
 updateDigest :: Connection -> FilePath -> IO ()
 updateDigest conn  filePath = do
   handle <- openFile filePath ReadMode
-  digest <- (md5sum handle md5InitialContext) `E.catch` (const $ return () :: IOError -> IO ())
+  digest <- (md5sum handle md5InitialContext) `catch` (const $ return () :: IOError -> IO ())
   hClose handle
   return digest
  where
@@ -154,13 +145,13 @@ main = do
       hClose handle
       (debug ops) `when` putStrLn path
       conn <- open path
-      (execute_ conn "create table file (path text primary key, size integer not null, digest text)") `E.catch` (const $ return () :: SQLError -> IO ())
+      (execute_ conn "create table file (path text primary key, size integer not null, digest text)") `catch` (const $ return () :: SQLError -> IO ())
       putStr "File size checking: "
       listFileSize conn (dirs ops)
       rs1 <- query_ conn "select * from file where size in (select size from file group by size having count(*) > 1)" :: IO [File]
       let maxCount = show $ length rs1
       putStr $ "\nCalculating: 0/" ++ maxCount
-      foldrM (\(File path _ _) n -> do
+      _ <- foldrM (\(File path _ _) n -> do
         updateDigest conn path
         hPutStr stdout $ (take (length (show n ++ "/" ++ maxCount)) $ repeat '\b') ++ show (n + 1) ++ "/" ++ maxCount
         hFlush stdout
